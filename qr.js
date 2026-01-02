@@ -1,9 +1,10 @@
+[file content begin]
 const { makeid } = require('./gen-id');
 const express = require('express');
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-let router = express.Router();
+const router = express.Router();
 const pino = require("pino");
 const {
     makeWASocket,
@@ -12,172 +13,142 @@ const {
     Browsers
 } = require("@whiskeysockets/baileys");
 
-const { upload } = require('./mega');
-
-function removeFile(FilePath) {
-    if (!fs.existsSync(FilePath)) return false;
-    try {
-        fs.rmSync(FilePath, { recursive: true, force: true });
-    } catch (err) {
-        console.error("Error removing file:", err);
-    }
-}
-
-// Ensure temp directory exists
-const tempDir = path.join(__dirname, 'temp');
-if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-}
-
 router.get('/', async (req, res) => {
-    res.setHeader('Content-Type', 'text/html');
-    res.sendFile(path.join(__dirname, '../qr.html'));
-});
-
-router.get('/server', async (req, res) => {
-    const id = makeid();
-    
-    async function MALVIN_XD_PAIR_CODE() {
-        const {
-            state,
-            saveCreds
-        } = await useMultiFileAuthState(`./temp/${id}`);
-        
-        try {
-            let sock = makeWASocket({
-                auth: state,
-                printQRInTerminal: false,
-                logger: pino({ level: "silent" }),
-                browser: Browsers.macOS("Desktop"),
-            });
-            
-            sock.ev.on('creds.update', saveCreds);
-            
-            sock.ev.on("connection.update", async (update) => {
-                const { connection, qr, lastDisconnect } = update;
-                
-                if (qr) {
-                    try {
-                        const qrBuffer = await QRCode.toBuffer(qr);
-                        res.setHeader('Content-Type', 'image/png');
-                        res.end(qrBuffer);
-                    } catch (error) {
-                        console.error("QR generation error:", error);
-                    }
-                }
-                
-                if (connection === "open") {
-                    console.log("Connected successfully!");
-                    
-                    try {
-                        await delay(3000);
-                        
-                        const credsPath = path.join(__dirname, `temp/${id}/creds.json`);
-                        
-                        if (fs.existsSync(credsPath)) {
-                            try {
-                                const { upload } = require('./mega');
-                                const mega_url = await upload(fs.createReadStream(credsPath), `${sock.user.id}.json`);
-                                const string_session = mega_url.replace('https://mega.nz/file/', '');
-                                let md = "malvin~" + string_session;
-                                
-                                await sock.sendMessage(sock.user.id, { text: md });
-                                
-                                let desc = `*Hey there, MALVIN-XD User!* 👋🏻
-
-Thanks for using *MALVIN-XD* — your session has been successfully created!
-
-🔐 *Session ID:* Sent above  
-⚠️ *Keep it safe!* Do NOT share this ID with anyone.
-
-——————
-
-*✅ Stay Updated:*  
-Join our official WhatsApp Channel:  
-https://whatsapp.com/channel/0029VbA6MSYJUM2TVOzCSb2A
-
-*💻 Source Code:*  
-Fork & explore the project on GitHub:  
-https://github.com/XdKing2/MALVIN-XD
-
-——————
-
-> *© Powered by Malvin King*
-Stay cool and hack smart. ✌🏻`;
-                                
-                                await sock.sendMessage(sock.user.id, {
-                                    text: desc,
-                                    contextInfo: {
-                                        externalAdReply: {
-                                            title: "ᴍᴀʟᴠɪɴ-xᴅ",
-                                            thumbnailUrl: "https://files.catbox.moe/bqs70b.jpg",
-                                            sourceUrl: "https://whatsapp.com/channel/0029VbA6MSYJUM2TVOzCSb2A",
-                                            mediaType: 1,
-                                            renderLargerThumbnail: true
-                                        }  
-                                    }
-                                });
-                                
-                            } catch (e) {
-                                console.error("Upload error:", e);
-                                await sock.sendMessage(sock.user.id, { 
-                                    text: `Error: ${e.message}\n\nBut your session is connected! Use /session command to get your session ID.`
-                                });
-                            }
-                        }
-                        
-                        await delay(1000);
-                        await sock.logout();
-                        
-                    } catch (error) {
-                        console.error("Error after connection:", error);
-                    } finally {
-                        removeFile(`./temp/${id}`);
-                        console.log(`👤 ${sock.user.id} Connected ✅`);
-                    }
-                    
-                } else if (connection === "close") {
-                    const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== 401;
-                    
-                    if (shouldReconnect) {
-                        console.log("Reconnecting...");
-                        await delay(2000);
-                        MALVIN_XD_PAIR_CODE();
-                    } else {
-                        console.log("Connection closed");
-                        removeFile(`./temp/${id}`);
-                    }
-                }
-            });
-            
-        } catch (err) {
-            console.error("Error in MALVIN_XD_PAIR_CODE:", err);
-            removeFile(`./temp/${id}`);
-            
-            if (!res.headersSent) {
-                res.status(500).send("Service Unavailable");
-            }
-        }
-    }
-    
-    MALVIN_XD_PAIR_CODE();
-});
-
-// Optional: Auto-restart every 30 minutes
-setInterval(() => {
-    console.log("☘️ Restarting process...");
-    // Clean temp directory
+    // Clean old temp files
+    const tempDir = path.join(__dirname, 'temp');
     if (fs.existsSync(tempDir)) {
-        fs.readdirSync(tempDir).forEach(file => {
-            const filePath = path.join(tempDir, file);
-            if (fs.statSync(filePath).isDirectory()) {
-                const dirAge = Date.now() - fs.statSync(filePath).mtimeMs;
-                if (dirAge > 1800000) { // 30 minutes
-                    removeFile(filePath);
+        const now = Date.now();
+        fs.readdirSync(tempDir).forEach(folder => {
+            const folderPath = path.join(tempDir, folder);
+            try {
+                if (fs.statSync(folderPath).isDirectory()) {
+                    const folderAge = now - fs.statSync(folderPath).mtimeMs;
+                    if (folderAge > 300000) { // 5 minutes
+                        fs.rmSync(folderPath, { recursive: true, force: true });
+                    }
                 }
+            } catch (e) {
+                // Ignore
             }
         });
     }
-}, 1800000); // 30 minutes
+    
+    const sessionId = makeid(6);
+    const sessionPath = path.join(__dirname, `temp/${sessionId}`);
+    
+    console.log(`📷 QR session started: ${sessionId}`);
+    
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+        
+        const sock = makeWASocket({
+            auth: state,
+            printQRInTerminal: false,
+            logger: pino({ level: "silent" }),
+            browser: Browsers.macOS("Safari"),
+            syncFullHistory: false,
+            connectTimeoutMs: 30000
+        });
+        
+        sock.ev.on('creds.update', saveCreds);
+        
+        sock.ev.on("connection.update", async (update) => {
+            const { connection, qr, lastDisconnect } = update;
+            
+            // Send QR code
+            if (qr && !res.headersSent) {
+                try {
+                    console.log(`✅ QR generated for session ${sessionId}`);
+                    const qrBuffer = await QRCode.toBuffer(qr, {
+                        errorCorrectionLevel: 'H',
+                        margin: 2,
+                        width: 400
+                    });
+                    
+                    res.setHeader('Content-Type', 'image/png');
+                    res.setHeader('X-Session-ID', sessionId);
+                    res.end(qrBuffer);
+                    
+                } catch (qrError) {
+                    console.error("❌ QR generation error:", qrError);
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: "Failed to generate QR code" });
+                    }
+                }
+            }
+            
+            if (connection === "open") {
+                console.log(`✅ WhatsApp connected for session ${sessionId}`);
+                
+                try {
+                    await delay(2000);
+                    
+                    // Send success message
+                    const successMsg = `✅ *MALVIN-XD QR Session Connected!*\n\n` +
+                                      `🆔 *Session ID:* ${sessionId}\n` +
+                                      `📱 *User:* ${sock.user?.id || 'Unknown'}\n` +
+                                      `⏰ *Time:* ${new Date().toLocaleTimeString()}\n\n` +
+                                      `🔐 *Session created successfully!*\n` +
+                                      `⚠️ *Do not share your session with anyone*\n\n` +
+                                      `🔗 *GitHub:* https://github.com/XdKing2/MALVIN-XD`;
+                    
+                    await sock.sendMessage(sock.user.id, { text: successMsg });
+                    
+                } catch (msgError) {
+                    console.log("Welcome message not sent");
+                }
+                
+                // Cleanup after 3 seconds
+                setTimeout(async () => {
+                    try {
+                        await sock.ws.close();
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                        console.log(`🧹 QR session ${sessionId} cleaned`);
+                    } catch (e) {
+                        // Ignore cleanup errors
+                    }
+                }, 3000);
+                
+            } else if (connection === "close") {
+                console.log(`📴 QR session ${sessionId} closed`);
+                try {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                } catch (e) {}
+                
+                if (lastDisconnect?.error?.output?.statusCode === 401) {
+                    console.log("🔐 Authentication failed for QR session");
+                }
+            }
+        });
+        
+        // Timeout after 30 seconds if no QR
+        setTimeout(() => {
+            if (!res.headersSent) {
+                console.log(`⏰ QR timeout for session ${sessionId}`);
+                res.status(408).json({ 
+                    error: "QR generation timeout",
+                    message: "Please reload the page and try again"
+                });
+                try {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                } catch (e) {}
+            }
+        }, 30000);
+        
+    } catch (error) {
+        console.error("❌ QR server error:", error.message);
+        try {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+        } catch (e) {}
+        
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: "QR service unavailable",
+                message: "Please try again in a moment"
+            });
+        }
+    }
+});
 
 module.exports = router;
+[file content end]
