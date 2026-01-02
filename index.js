@@ -1,29 +1,88 @@
 const express = require('express');
 const app = express();
-__path = process.cwd()
-const bodyParser = require("body-parser");
-const PORT = process.env.PORT || 8000;
-let server = require('./qr'),
-    code = require('./pair');
-require('events').EventEmitter.defaultMaxListeners = 500;
-app.use('/server', server);
-app.use('/code', code);
-app.use('/pair',async (req, res, next) => {
-res.sendFile(__path + '/pair.html')
-})
-app.use('/qr',async (req, res, next) => {
-res.sendFile(__path + '/qr.html')
-})
-app.use('/',async (req, res, next) => {
-res.sendFile(__path + '/main.html')
-})
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+const path = require('path');
+const fs = require('fs');
+
+const PORT = process.env.PORT || 3000;
+
+// Ensure temp directory exists
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+}
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Serve static files
+app.use(express.static(__dirname));
+
+// Import routes
+const pairRouter = require('./pair');
+const qrRouter = require('./qr');
+
+// Routes
+app.use('/code', pairRouter);   // Pair code API: /code?number=263...
+app.use('/qr-api', qrRouter);   // QR API: /qr-api
+
+// HTML pages
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pair.html'));
+});
+
+app.get('/qr', (req, res) => {
+    res.sendFile(path.join(__dirname, 'qr.html'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        service: 'MALVIN-XD Pair Service',
+        uptime: process.uptime()
+    });
+});
+
+// Error handling
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ error: 'Internal Server Error' });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+});
+
+// Start server
 app.listen(PORT, () => {
     console.log(`
-Don't Forgot To Give Star MALVIN-XD
+╔═══════════════════════════════════════════════════╗
+║                                                   ║
+║   🚀 MALVIN-XD PAIR SERVER STARTED SUCCESSFULLY  ║
+║                                                   ║
+╠═══════════════════════════════════════════════════╣
+║                                                   ║
+║   🔗 Main URL:    http://localhost:${PORT}        ║
+║   📱 Pair Code:   http://localhost:${PORT}/       ║
+║   📷 QR Scanner:  http://localhost:${PORT}/qr     ║
+║   ❤️  Health:      http://localhost:${PORT}/health ║
+║                                                   ║
+║   ⏰ Server Time: ${new Date().toLocaleString()}  ║
+║                                                   ║
+╚═══════════════════════════════════════════════════╝
+    `);
+});
 
- Server running on http://localhost:` + PORT)
-})
-
-module.exports = app
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('\n🔴 Shutting down server...');
+    // Clean temp directory
+    if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        console.log('🧹 Temp directory cleaned');
+    }
+    console.log('👋 Server stopped gracefully');
+    process.exit(0);
+});
