@@ -1,104 +1,133 @@
+[file content begin]
 const { makeid } = require('./gen-id');
 const express = require('express');
 const fs = require('fs');
-let router = express.Router();
+const path = require('path');
+const router = express.Router();
 const pino = require("pino");
-const { makeWASocket, useMultiFileAuthState, delay, Browsers, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys')
+const { 
+    makeWASocket, 
+    useMultiFileAuthState, 
+    delay, 
+    Browsers,
+    makeCacheableSignalKeyStore 
+} = require('@whiskeysockets/baileys');
 
-const { upload } = require('./mega');
-
+// Clean up temp files
 function removeFile(FilePath) {
     if (!fs.existsSync(FilePath)) return false;
-    fs.rmSync(FilePath, { recursive: true, force: true });
+    try {
+        fs.rmSync(FilePath, { recursive: true, force: true });
+        return true;
+    } catch (err) {
+        console.error("Error removing file:", err);
+        return false;
+    }
 }
 
 router.get('/', async (req, res) => {
-    const id = makeid();
-    let num = req.query.number;
+    const number = req.query.number;
     
-    if (!num) {
-        return res.status(400).json({ error: "Number is required" });
+    // Validate number
+    if (!number) {
+        return res.status(400).json({ error: "Phone number is required" });
     }
-
-    async function MALVIN_XD_PAIR_CODE() {
-        const {
-            state,
-            saveCreds
-        } = await useMultiFileAuthState(`./temp/${id}`);
+    
+    // Clean number
+    const cleanNumber = number.replace(/[^0-9]/g, '');
+    if (cleanNumber.length < 10) {
+        return res.status(400).json({ error: "Invalid phone number" });
+    }
+    
+    const sessionId = makeid(8);
+    const sessionPath = path.join(__dirname, `temp/${sessionId}`);
+    
+    console.log(`🔑 Starting pairing for: ${cleanNumber}`);
+    
+    try {
+        // Create auth state
+        const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
         
-        try {
-            var items = ["Safari"];
-            function selectRandomItem(array) {
-                var randomIndex = Math.floor(Math.random() * array.length);
-                return array[randomIndex];
-            }
-            var randomItem = selectRandomItem(items);
+        // Create WhatsApp socket
+        const sock = makeWASocket({
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }))
+            },
+            printQRInTerminal: false,
+            logger: pino({ level: "fatal" }),
+            syncFullHistory: false,
+            browser: Browsers.macOS("Safari")
+        });
+        
+        sock.ev.on('creds.update', saveCreds);
+        
+        // Handle connection events
+        sock.ev.on("connection.update", async (update) => {
+            const { connection } = update;
             
-            let sock = makeWASocket({
-                auth: {
-                    creds: state.creds,
-                    keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
-                },
-                printQRInTerminal: false,
-                logger: pino({ level: "fatal" }).child({ level: "fatal" }),
-                syncFullHistory: false,
-                browser: Browsers.macOS(randomItem)
-            });
-
-            sock.ev.on('creds.update', saveCreds);
-            
-            sock.ev.on("connection.update", async (update) => {
-                const { connection, lastDisconnect } = update;
-                
-                if (connection === "open") {
-                    try {
-                        await delay(2000);
-                        
-                        // Request pairing code
-                        num = num.replace(/[^0-9]/g, '');
-                        const code = await sock.requestPairingCode(num);
-                        
-                        if (!res.headersSent) {
-                            return res.json({ code });
-                        }
-                        
-                        // Cleanup
-                        await delay(100);
-                        await sock.logout();
-                        removeFile(`./temp/${id}`);
-                        
-                    } catch (error) {
-                        console.error("Error in pairing:", error);
-                        if (!res.headersSent) {
-                            return res.status(500).json({ error: "Failed to get pairing code" });
-                        }
+            if (connection === "open") {
+                try {
+                    await delay(1000);
+                    
+                    // Get pairing code
+                    const pairingCode = await sock.requestPairingCode(cleanNumber);
+                    console.log(`✅ Pairing code generated for ${cleanNumber}: ${pairingCode}`);
+                    
+                    if (!res.headersSent) {
+                        res.json({ 
+                            code: pairingCode,
+                            number: `+${cleanNumber}`,
+                            message: "Pairing code generated successfully"
+                        });
                     }
                     
-                } else if (connection === "close") {
-                    const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== 401;
+                    // Cleanup after sending response
+                    setTimeout(async () => {
+                        try {
+                            await sock.logout();
+                            await delay(500);
+                            removeFile(sessionPath);
+                            console.log(`🧹 Session ${sessionId} cleaned up`);
+                        } catch (e) {
+                            console.error("Cleanup error:", e);
+                        }
+                    }, 2000);
                     
-                    if (shouldReconnect) {
-                        console.log("Reconnecting...");
-                        await delay(2000);
-                        MALVIN_XD_PAIR_CODE();
-                    } else {
-                        console.log("Connection closed permanently");
-                        removeFile(`./temp/${id}`);
+                } catch (pairError) {
+                    console.error("Pairing error:", pairError);
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: "Failed to generate pairing code" });
                     }
+                    removeFile(sessionPath);
                 }
-            });
-
-        } catch (err) {
-            console.error("Error in MALVIN_XD_PAIR_CODE:", err);
-            removeFile(`./temp/${id}`);
-            
-            if (!res.headersSent) {
-                return res.status(500).json({ code: "Service Unavailable" });
+                
+            } else if (connection === "close") {
+                console.log("Connection closed for", cleanNumber);
+                removeFile(sessionPath);
             }
+        });
+        
+        // Timeout after 30 seconds
+        setTimeout(() => {
+            if (!res.headersSent) {
+                res.status(408).json({ error: "Request timeout. Please try again." });
+                removeFile(sessionPath);
+            }
+        }, 30000);
+        
+    } catch (error) {
+        console.error("Server error:", error);
+        removeFile(sessionPath);
+        
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: "Service temporarily unavailable",
+                message: "Please try again in a few moments"
+            });
         }
     }
-    
-    return MALVIN_XD_PAIR_CODE();
 });
 
 module.exports = router;
+[file content end]
