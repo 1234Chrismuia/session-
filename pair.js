@@ -1,4 +1,3 @@
-[file content begin]
 const { makeid } = require('./gen-id');
 const express = require('express');
 const fs = require('fs');
@@ -179,4 +178,4 @@ router.get('/', async (req, res) => {
 });
 
 module.exports = router;
-[file content end]
+
