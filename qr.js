@@ -1,4 +1,3 @@
-[file content begin]
 const { makeid } = require('./gen-id');
 const express = require('express');
 const QRCode = require('qrcode');
@@ -151,4 +150,4 @@ router.get('/', async (req, res) => {
 });
 
 module.exports = router;
-[file content end]
+
