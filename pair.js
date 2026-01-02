@@ -13,36 +13,46 @@ const {
     makeCacheableSignalKeyStore 
 } = require('@whiskeysockets/baileys');
 
-// Clean up temp files
-function removeFile(FilePath) {
-    if (!fs.existsSync(FilePath)) return false;
-    try {
-        fs.rmSync(FilePath, { recursive: true, force: true });
-        return true;
-    } catch (err) {
-        console.error("Error removing file:", err);
-        return false;
+// Clean temp directory
+function cleanTemp() {
+    const tempDir = path.join(__dirname, 'temp');
+    if (fs.existsSync(tempDir)) {
+        const now = Date.now();
+        fs.readdirSync(tempDir).forEach(folder => {
+            const folderPath = path.join(tempDir, folder);
+            try {
+                if (fs.statSync(folderPath).isDirectory()) {
+                    const folderAge = now - fs.statSync(folderPath).mtimeMs;
+                    if (folderAge > 300000) { // 5 minutes
+                        fs.rmSync(folderPath, { recursive: true, force: true });
+                    }
+                }
+            } catch (e) {
+                // Ignore
+            }
+        });
     }
 }
 
 router.get('/', async (req, res) => {
+    // Clean old temp files first
+    cleanTemp();
+    
     const number = req.query.number;
     
-    // Validate number
     if (!number) {
         return res.status(400).json({ error: "Phone number is required" });
     }
     
-    // Clean number
     const cleanNumber = number.replace(/[^0-9]/g, '');
     if (cleanNumber.length < 10) {
-        return res.status(400).json({ error: "Invalid phone number" });
+        return res.status(400).json({ error: "Invalid phone number format" });
     }
     
-    const sessionId = makeid(8);
+    const sessionId = makeid(6);
     const sessionPath = path.join(__dirname, `temp/${sessionId}`);
     
-    console.log(`🔑 Starting pairing for: ${cleanNumber}`);
+    console.log(`📱 Pair request for: +${cleanNumber} (Session: ${sessionId})`);
     
     try {
         // Create auth state
@@ -52,78 +62,117 @@ router.get('/', async (req, res) => {
         const sock = makeWASocket({
             auth: {
                 creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }))
+                keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
             },
             printQRInTerminal: false,
-            logger: pino({ level: "fatal" }),
+            logger: pino({ level: "silent" }),
             syncFullHistory: false,
-            browser: Browsers.macOS("Safari")
+            browser: Browsers.macOS("Safari"),
+            connectTimeoutMs: 30000
         });
         
         sock.ev.on('creds.update', saveCreds);
         
-        // Handle connection events
         sock.ev.on("connection.update", async (update) => {
-            const { connection } = update;
+            const { connection, lastDisconnect } = update;
             
             if (connection === "open") {
                 try {
                     await delay(1000);
                     
-                    // Get pairing code
+                    // Request pairing code
                     const pairingCode = await sock.requestPairingCode(cleanNumber);
-                    console.log(`✅ Pairing code generated for ${cleanNumber}: ${pairingCode}`);
+                    console.log(`✅ Pairing code generated for +${cleanNumber}: ${pairingCode}`);
+                    
+                    // Format response
+                    const formattedNumber = `+${cleanNumber.slice(0,3)} ${cleanNumber.slice(3,7)} ${cleanNumber.slice(7)}`;
                     
                     if (!res.headersSent) {
                         res.json({ 
                             code: pairingCode,
-                            number: `+${cleanNumber}`,
-                            message: "Pairing code generated successfully"
+                            number: formattedNumber,
+                            message: "✅ Pairing code generated successfully!",
+                            note: "Enter this code in WhatsApp > Linked Devices > Link a Device"
                         });
                     }
                     
-                    // Cleanup after sending response
+                    // Send welcome message to user
+                    try {
+                        await delay(2000);
+                        const welcomeMsg = `🔐 *MALVIN-XD Session Created!*\n\n` +
+                                          `📱 *Number:* ${formattedNumber}\n` +
+                                          `🔢 *Code:* ${pairingCode}\n` +
+                                          `⏰ *Time:* ${new Date().toLocaleTimeString()}\n\n` +
+                                          `⚠️ *Keep your session secure!*\n` +
+                                          `🔗 *GitHub:* https://github.com/XdKing2/MALVIN-XD`;
+                        
+                        await sock.sendMessage(sock.user.id, { text: welcomeMsg });
+                    } catch (msgError) {
+                        console.log("Welcome message not sent (expected)");
+                    }
+                    
+                    // Cleanup after 5 seconds
                     setTimeout(async () => {
                         try {
-                            await sock.logout();
-                            await delay(500);
-                            removeFile(sessionPath);
-                            console.log(`🧹 Session ${sessionId} cleaned up`);
+                            await sock.ws.close();
+                            fs.rmSync(sessionPath, { recursive: true, force: true });
+                            console.log(`🧹 Session ${sessionId} cleaned`);
                         } catch (e) {
-                            console.error("Cleanup error:", e);
+                            // Ignore cleanup errors
                         }
-                    }, 2000);
+                    }, 5000);
                     
                 } catch (pairError) {
-                    console.error("Pairing error:", pairError);
+                    console.error("❌ Pairing error:", pairError.message);
                     if (!res.headersSent) {
-                        res.status(500).json({ error: "Failed to generate pairing code" });
+                        res.status(500).json({ 
+                            error: "Failed to generate pairing code",
+                            details: "Make sure the number is valid and try again"
+                        });
                     }
-                    removeFile(sessionPath);
+                    try {
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                    } catch (e) {}
                 }
                 
             } else if (connection === "close") {
-                console.log("Connection closed for", cleanNumber);
-                removeFile(sessionPath);
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                if (statusCode === 401) {
+                    console.log("🔐 Authentication required");
+                } else {
+                    console.log("📴 Connection closed");
+                }
+                
+                try {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                } catch (e) {}
             }
         });
         
         // Timeout after 30 seconds
         setTimeout(() => {
             if (!res.headersSent) {
-                res.status(408).json({ error: "Request timeout. Please try again." });
-                removeFile(sessionPath);
+                console.log(`⏰ Timeout for session ${sessionId}`);
+                res.status(408).json({ 
+                    error: "Request timeout",
+                    message: "Please try again. Make sure your number is correct."
+                });
+                try {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                } catch (e) {}
             }
         }, 30000);
         
     } catch (error) {
-        console.error("Server error:", error);
-        removeFile(sessionPath);
+        console.error("❌ Server error:", error.message);
+        try {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+        } catch (e) {}
         
         if (!res.headersSent) {
             res.status(500).json({ 
-                error: "Service temporarily unavailable",
-                message: "Please try again in a few moments"
+                error: "Service unavailable",
+                message: "Please wait a moment and try again"
             });
         }
     }
