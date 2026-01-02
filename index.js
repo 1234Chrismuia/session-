@@ -1,4 +1,3 @@
-[file content begin]
 const express = require('express');
 const app = express();
 const path = require('path');
@@ -108,4 +107,4 @@ process.on('SIGTERM', () => {
     console.log('✅ Cleanup complete');
     process.exit(0);
 });
-[file content end]
+
