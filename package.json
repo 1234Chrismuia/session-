@@ -1,33 +1,20 @@
-[file content begin]
 {
-    "name": "MALVIN-XD Pair",
+    "name": "malvin-pair",
+    "version": "2.0.0",
     "description": "WhatsApp Web Session Generator with Pair Code & QR",
-    "logo": "https://i.imgur.com/teQzVR1.jpeg",
-    "repository": "https://github.com/XdKing2/malvin-pair",
-    "keywords": ["whatsapp", "bot", "session", "pair", "qr", "malvin", "xd"],
-    "success_url": "/",
-    "buildpacks": [
-        {
-            "url": "heroku/nodejs"
-        }
-    ],
-    "env": {
-        "PORT": {
-            "description": "Port for the web server",
-            "value": "5000",
-            "required": false
-        },
-        "NODE_ENV": {
-            "description": "Node environment",
-            "value": "production",
-            "required": false
-        }
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js"
     },
-    "formation": {
-        "web": {
-            "quantity": 1,
-            "size": "free"
-        }
+    "dependencies": {
+        "@whiskeysockets/baileys": "^6.7.17",
+        "express": "^4.18.2",
+        "qrcode": "^1.5.3",
+        "pino": "^8.15.0",
+        "axios": "^1.6.0"
+    },
+    "engines": {
+        "node": ">=16.0.0"
     }
 }
-[file content end]
